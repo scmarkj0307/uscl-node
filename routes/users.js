@@ -13,6 +13,32 @@ router.get('/', async (req, res) => {
     }
 });
 
+router.get('/:id', async (req, res) => {
+    const userId = req.params.id;
+    console.log('Received request for user ID:', userId); // 👈 add this
+
+    try {
+        let pool = await sql.connect(config);
+        let result = await pool
+            .request()
+            .input('id', sql.Int, userId)
+            .query("SELECT * FROM Users WHERE Id = @id");
+
+        console.log('Query result:', result.recordset); // 👈 see what DB returns
+
+        if (result.recordset.length === 0) {
+            res.status(404).send("User not found");
+        } else {
+            res.json(result.recordset[0]);
+        }
+    } catch (err) {
+        console.error('DB error:', err); // 👈 catch SQL issues
+        res.status(500).send(err.message);
+    }
+});
+
+
+
 // Add user
 router.post('/', async (req, res) => {
     const { name, email } = req.body;
