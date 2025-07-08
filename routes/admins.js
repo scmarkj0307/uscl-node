@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
     const dataResult = await pool.request().query(`
       SELECT admin_id, username, email, created_at
       FROM tblAdmins
-      ORDER BY created_at DESC
+      ORDER BY admin_id ASC
       OFFSET ${offset} ROWS
       FETCH NEXT ${limit} ROWS ONLY
     `);
@@ -34,6 +34,5 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch admins' });
   }
 });
-
 
 module.exports = router;

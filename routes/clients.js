@@ -11,11 +11,11 @@ router.get('/', async (req, res) => {
   try {
     const pool = await sql.connect(config);
 
-    // Fetch paginated clients
+    // Fetch paginated clients ordered by clientId ascending
     const dataResult = await pool.request().query(`
       SELECT clientId, clientName, email, created_at
       FROM tblClients
-      ORDER BY created_at DESC
+      ORDER BY clientId ASC
       OFFSET ${offset} ROWS
       FETCH NEXT ${limit} ROWS ONLY
     `);
