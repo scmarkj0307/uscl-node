@@ -2,6 +2,8 @@
 IF OBJECT_ID('dbo.tblAdmins', 'U') IS NOT NULL
     DROP TABLE dbo.tblAdmins;
 
+GO
+
 -- Create the table
 CREATE TABLE dbo.tblAdmins (
     admin_id INT IDENTITY(1,1) PRIMARY KEY,
@@ -10,3 +12,5 @@ CREATE TABLE dbo.tblAdmins (
     email NVARCHAR(100),
     created_at DATETIME DEFAULT GETDATE()
 );
+
+GO

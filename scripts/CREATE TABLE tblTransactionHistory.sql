@@ -2,6 +2,8 @@
 IF OBJECT_ID('dbo.tblTransactionHistory', 'U') IS NOT NULL
     DROP TABLE dbo.tblTransactionHistory;
 
+GO
+
 -- Create tblTransactionHistory
 CREATE TABLE dbo.tblTransactionHistory (
     historyId INT IDENTITY(1,1) PRIMARY KEY,
@@ -12,3 +14,5 @@ CREATE TABLE dbo.tblTransactionHistory (
     created_at DATETIME NOT NULL,
     changed_at DATETIME DEFAULT GETDATE()
 );
+
+GO

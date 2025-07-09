@@ -2,6 +2,8 @@
 IF OBJECT_ID('dbo.trg_AuditTransactionUpdate', 'TR') IS NOT NULL
     DROP TRIGGER dbo.trg_AuditTransactionUpdate;
 
+GO
+
 -- Create the trigger to track INSERTs and UPDATEs
 CREATE TRIGGER trg_AuditTransactionUpdate
 ON dbo.tblTransactions
@@ -30,3 +32,5 @@ BEGIN
 
     -- Optional: if you want to distinguish between INSERT and UPDATE, you can add a column or logic.
 END;
+
+GO
