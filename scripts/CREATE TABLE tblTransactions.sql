@@ -8,11 +8,11 @@ GO
 -- Create tblTransactions
 CREATE TABLE dbo.tblTransactions (
     Id INT IDENTITY(1,1) PRIMARY KEY,
-    trackingId INT NOT NULL UNIQUE,
+    trackingId NVARCHAR(50) NOT NULL UNIQUE, -- 👈 changed from INT to NVARCHAR
     clientId INT NOT NULL,
     trackingMessage NVARCHAR(255) NOT NULL,
-	trackingStatusId INT NOT NULL,
-    created_at DATETIME DEFAULT GETDATE(),
+    trackingStatusId INT NOT NULL,
+    created_at DATETIME DEFAULT GETDATE()
 );
 
 GO

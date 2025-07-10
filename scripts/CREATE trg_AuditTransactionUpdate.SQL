@@ -12,7 +12,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Handle INSERT operations
+    -- Track changes from INSERTED rows
     INSERT INTO dbo.tblTransactionHistory (
         trackingId,
         clientId,
@@ -29,8 +29,6 @@ BEGIN
         i.created_at,
         GETDATE()
     FROM INSERTED i;
-
-    -- Optional: if you want to distinguish between INSERT and UPDATE, you can add a column or logic.
 END;
 
 GO

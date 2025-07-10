@@ -4,10 +4,10 @@ IF OBJECT_ID('dbo.tblTransactionHistory', 'U') IS NOT NULL
 
 GO
 
--- Create tblTransactionHistory
+-- Create tblTransactionHistory with trackingId as NVARCHAR
 CREATE TABLE dbo.tblTransactionHistory (
     historyId INT IDENTITY(1,1) PRIMARY KEY,
-    trackingId INT NOT NULL,
+    trackingId NVARCHAR(50) NOT NULL,
     clientId INT NOT NULL,
     trackingMessage NVARCHAR(255) NOT NULL,
     trackingStatusId INT NOT NULL,
