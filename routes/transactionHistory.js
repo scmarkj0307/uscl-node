@@ -27,11 +27,12 @@ router.get('/', async (req, res) => {
           th.clientId,
           c.clientName,
           th.trackingMessage,
-          th.trackingStatusId,
+          s.statusName,
           th.created_at,
           th.changed_at
         FROM tblTransactionHistory th
         INNER JOIN tblClients c ON th.clientId = c.clientId
+        INNER JOIN tblStatus s ON th.trackingStatusId = s.Id
         ${whereClause}
         ORDER BY th.historyId ASC
         OFFSET ${offset} ROWS
