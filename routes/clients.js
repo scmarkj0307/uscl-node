@@ -11,9 +11,17 @@ router.get('/', async (req, res) => {
   try {
     const pool = await sql.connect(config);
 
-    // Fetch paginated clients ordered by clientId ascending
+    // Fetch paginated clients with status label
     const dataResult = await pool.request().query(`
-      SELECT clientId, clientName, email, created_at
+      SELECT 
+        clientId,
+        clientName,
+        email,
+        CASE 
+          WHEN isActive = 1 THEN 'Active' 
+          ELSE 'Inactive' 
+        END AS status,
+        created_at
       FROM tblClients
       ORDER BY clientId ASC
       OFFSET ${offset} ROWS
@@ -38,5 +46,37 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch clients' });
   }
 });
+
+// POST /clients
+router.post('/', async (req, res) => {
+  const { clientName, email, isActive } = req.body;
+
+  if (!clientName || !email || typeof isActive !== 'boolean') {
+    return res.status(400).json({ error: 'clientName, email, and isActive (boolean) are required' });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Insert the new client
+    await pool.request()
+      .input('clientName', sql.NVarChar(100), clientName)
+      .input('email', sql.NVarChar(100), email)
+      .input('isActive', sql.Bit, isActive)
+      .query(`
+        INSERT INTO tblClients (clientName, email, isActive)
+        VALUES (@clientName, @email, @isActive)
+      `);
+
+    res.status(201).json({ message: 'Client added successfully' });
+  } catch (error) {
+    console.error('Error adding client:', error);
+    if (error.originalError?.info?.number === 2627) {
+      return res.status(409).json({ error: 'Client with the same name or email already exists' });
+    }
+    res.status(500).json({ error: 'Failed to add client' });
+  }
+});
+
 
 module.exports = router;
