@@ -79,4 +79,85 @@ router.post('/', async (req, res) => {
 });
 
 
+// PUT /clients/:id
+router.put('/:id', async (req, res) => {
+  const clientId = parseInt(req.params.id);
+  const { clientName, email, isActive } = req.body;
+
+  if (!clientId || !clientName || !email || typeof isActive !== 'boolean') {
+    return res.status(400).json({ error: 'clientId, clientName, email, and isActive (boolean) are required' });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Check if client exists
+    const existingClient = await pool.request()
+      .input('clientId', sql.Int, clientId)
+      .query('SELECT * FROM tblClients WHERE clientId = @clientId');
+
+    if (existingClient.recordset.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    // Update client
+    await pool.request()
+      .input('clientId', sql.Int, clientId)
+      .input('clientName', sql.NVarChar(100), clientName)
+      .input('email', sql.NVarChar(100), email)
+      .input('isActive', sql.Bit, isActive)
+      .query(`
+        UPDATE tblClients
+        SET clientName = @clientName,
+            email = @email,
+            isActive = @isActive
+        WHERE clientId = @clientId
+      `);
+
+    res.status(200).json({ message: 'Client updated successfully' });
+  } catch (error) {
+    console.error('Error updating client:', error);
+    if (error.originalError?.info?.number === 2627) {
+      return res.status(409).json({ error: 'Client with the same name or email already exists' });
+    }
+    res.status(500).json({ error: 'Failed to update client' });
+  }
+});
+
+
+// DELETE /clients/:id
+router.delete('/:id', async (req, res) => {
+  const clientId = parseInt(req.params.id);
+
+  if (!clientId) {
+    return res.status(400).json({ error: 'Invalid client ID' });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Check if client exists
+    const existing = await pool.request()
+      .input('clientId', sql.Int, clientId)
+      .query('SELECT clientId FROM tblClients WHERE clientId = @clientId');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    // Delete client
+    await pool.request()
+      .input('clientId', sql.Int, clientId)
+      .query('DELETE FROM tblClients WHERE clientId = @clientId');
+
+    res.status(200).json({ message: 'Client deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting client:', error);
+    res.status(500).json({ error: 'Failed to delete client' });
+  }
+});
+
+
+
+
 module.exports = router;
