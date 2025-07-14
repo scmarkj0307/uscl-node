@@ -27,6 +27,7 @@ router.get('/', async (req, res) => {
           th.clientId,
           c.clientName,
           th.trackingMessage,
+          th.description,
           s.statusName,
           th.created_at,
           th.changed_at

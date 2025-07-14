@@ -30,7 +30,8 @@ router.get('/:id', async (req, res) => {
           t.trackingId, 
           t.clientId,
           c.clientName,
-          t.trackingMessage, 
+          t.trackingMessage,
+          t.description, 
           s.statusName, 
           t.created_at
         FROM tblTransactions t
@@ -65,7 +66,8 @@ router.get('/', async (req, res) => {
         t.trackingId, 
         t.clientId,
         c.clientName, 
-        t.trackingMessage, 
+        t.trackingMessage,
+        t.description, 
         s.statusName, 
         t.created_at
       FROM tblTransactions t
@@ -97,7 +99,7 @@ router.get('/', async (req, res) => {
 
 // POST a new transaction with retry on duplicate trackingId
 router.post('/', async (req, res) => {
-  const { clientId, trackingMessage, trackingStatusId } = req.body;
+  const { clientId, trackingMessage, trackingStatusId, description  } = req.body;
 
   if (!clientId || !trackingMessage || !trackingStatusId) {
     return res.status(400).json({
@@ -122,9 +124,10 @@ router.post('/', async (req, res) => {
         .input('clientId', sql.Int, clientId)
         .input('trackingMessage', sql.NVarChar(255), trackingMessage)
         .input('trackingStatusId', sql.Int, trackingStatusId)
+        .input('description', sql.NVarChar(255), description || null)
         .query(`
-          INSERT INTO tblTransactions (trackingId, clientId, trackingMessage, trackingStatusId)
-          VALUES (@trackingId, @clientId, @trackingMessage, @trackingStatusId)
+          INSERT INTO tblTransactions (trackingId, clientId, trackingMessage, trackingStatusId, description)
+          VALUES (@trackingId, @clientId, @trackingMessage, @trackingStatusId, @description)
         `);
 
       inserted = true;
