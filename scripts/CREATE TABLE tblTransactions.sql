@@ -12,6 +12,7 @@ CREATE TABLE dbo.tblTransactions (
     clientId INT NOT NULL,
     trackingMessage NVARCHAR(255) NOT NULL,
     trackingStatusId INT NOT NULL,
+    description NVARCHAR(255) NULL, -- 👈 new column
     created_at DATETIME DEFAULT GETDATE()
 );
 

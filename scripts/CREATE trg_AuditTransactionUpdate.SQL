@@ -18,6 +18,7 @@ BEGIN
         clientId,
         trackingMessage,
         trackingStatusId,
+        description, -- 👈 added field
         created_at,
         changed_at
     )
@@ -26,6 +27,7 @@ BEGIN
         i.clientId,
         i.trackingMessage,
         i.trackingStatusId,
+        i.description, -- 👈 added field
         i.created_at,
         GETDATE()
     FROM INSERTED i;
