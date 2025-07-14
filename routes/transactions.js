@@ -1,4 +1,3 @@
-// routes/transactions.js
 const express = require('express');
 const router = express.Router();
 const { sql, config } = require('../config/db');
@@ -10,11 +9,9 @@ function generateTrackingId() {
   return `TRX-${now}-${rand}`;
 }
 
-
-
-// GET transaction by trackingId (string)
+// GET transaction by trackingId
 router.get('/:id', async (req, res) => {
-  const trackingId = req.params.id; // treat it as string
+  const trackingId = req.params.id;
 
   if (!trackingId || typeof trackingId !== 'string') {
     return res.status(400).json({ error: 'Invalid tracking ID' });
@@ -96,10 +93,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-
-// POST a new transaction with retry on duplicate trackingId
+// POST a new transaction
 router.post('/', async (req, res) => {
-  const { clientId, trackingMessage, trackingStatusId, description  } = req.body;
+  const { clientId, trackingMessage, trackingStatusId, description } = req.body;
 
   if (!clientId || !trackingMessage || !trackingStatusId) {
     return res.status(400).json({
@@ -108,7 +104,6 @@ router.post('/', async (req, res) => {
   }
 
   const pool = await sql.connect(config);
-
   let trackingId;
   let inserted = false;
   let attempts = 0;
@@ -131,16 +126,12 @@ router.post('/', async (req, res) => {
         `);
 
       inserted = true;
-
-      res.status(201).json({
-        message: 'Transaction created successfully',
-        trackingId
-      });
+      res.status(201).json({ message: 'Transaction created successfully', trackingId });
 
     } catch (error) {
       if (error.originalError?.info?.number === 2627) {
         console.warn(`Duplicate trackingId on attempt ${attempts}: ${trackingId}`);
-        continue; // try again
+        continue;
       }
 
       console.error('Error creating transaction:', error);
@@ -149,11 +140,88 @@ router.post('/', async (req, res) => {
   }
 
   if (!inserted) {
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Failed to generate a unique tracking ID. Please try again.'
     });
   }
 });
 
+// PUT /transactions/:id
+router.put('/:id', async (req, res) => {
+  const trackingId = req.params.id;
+  const { clientId, trackingMessage, trackingStatusId, description } = req.body;
+
+  if (!trackingId || !clientId || !trackingMessage || !trackingStatusId) {
+    return res.status(400).json({
+      error: 'trackingId, clientId, trackingMessage, and trackingStatusId are required',
+    });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Check if the transaction exists
+    const existing = await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .query('SELECT trackingId FROM tblTransactions WHERE trackingId = @trackingId');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    // Update the transaction
+    await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .input('clientId', sql.Int, clientId)
+      .input('trackingMessage', sql.NVarChar(255), trackingMessage)
+      .input('trackingStatusId', sql.Int, trackingStatusId)
+      .input('description', sql.NVarChar(255), description || null)
+      .query(`
+        UPDATE tblTransactions
+        SET clientId = @clientId,
+            trackingMessage = @trackingMessage,
+            trackingStatusId = @trackingStatusId,
+            description = @description
+        WHERE trackingId = @trackingId
+      `);
+
+    res.status(200).json({ message: 'Transaction updated successfully' });
+  } catch (error) {
+    console.error('Error updating transaction:', error);
+    res.status(500).json({ error: 'Failed to update transaction' });
+  }
+});
+
+// DELETE /transactions/:id
+router.delete('/:id', async (req, res) => {
+  const trackingId = req.params.id;
+
+  if (!trackingId) {
+    return res.status(400).json({ error: 'Invalid tracking ID' });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Check if transaction exists
+    const existing = await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .query('SELECT trackingId FROM tblTransactions WHERE trackingId = @trackingId');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    // Delete the transaction
+    await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .query('DELETE FROM tblTransactions WHERE trackingId = @trackingId');
+
+    res.status(200).json({ message: 'Transaction deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting transaction:', error);
+    res.status(500).json({ error: 'Failed to delete transaction' });
+  }
+});
 
 module.exports = router;

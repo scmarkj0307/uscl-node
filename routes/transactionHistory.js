@@ -65,4 +65,37 @@ router.get('/', async (req, res) => {
 });
 
 
+// DELETE /transaction-history/:id
+router.delete('/:id', async (req, res) => {
+  const trackingId = req.params.id;
+
+  if (!trackingId) {
+    return res.status(400).json({ error: 'Invalid history ID' });
+  }
+
+  try {
+    const pool = await sql.connect(config);
+
+    // Check if record exists
+    const existing = await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .query('SELECT trackingId FROM tblTransactionHistory WHERE trackingId = @trackingId');
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'Transaction history not found' });
+    }
+
+    // Delete the record
+    await pool.request()
+      .input('trackingId', sql.NVarChar(50), trackingId)
+      .query('DELETE FROM tblTransactionHistory WHERE trackingId = @trackingId');
+
+    res.status(200).json({ message: 'Transaction history deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting transaction history:', error);
+    res.status(500).json({ error: 'Failed to delete transaction history' });
+  }
+});
+
+
 module.exports = router;
