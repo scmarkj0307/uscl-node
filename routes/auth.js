@@ -8,7 +8,27 @@ const JWT_SECRET = 'your_secret_key'; // Ideally use process.env.JWT_SECRET
 
 // Register (Sign-up)
 router.post('/register', async (req, res) => {
-  const { username, password, email } = req.body;
+  const {
+    username,
+    password,
+    email,
+    isAdmin = false,
+    isSuperAdmin = false,
+    isDemo = false
+  } = req.body;
+
+  // Convert role values to booleans
+  const roles = [Boolean(isAdmin), Boolean(isSuperAdmin), Boolean(isDemo)];
+  const trueCount = roles.filter(Boolean).length;
+
+  // Validation: At least one and only one role must be true
+  if (trueCount === 0) {
+    return res.status(400).json({ message: 'At least one role must be true (isAdmin, isSuperAdmin, isDemo).' });
+  }
+
+  if (trueCount > 1) {
+    return res.status(400).json({ message: 'Only one role can be true at a time (isAdmin, isSuperAdmin, isDemo).' });
+  }
 
   try {
     const pool = await sql.connect(config);
@@ -25,14 +45,17 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert new admin
+    // Insert new admin with role
     await pool.request()
       .input('username', sql.NVarChar(50), username)
       .input('password', sql.NVarChar(255), hashedPassword)
       .input('email', sql.NVarChar(100), email)
+      .input('isAdmin', sql.Bit, isAdmin)
+      .input('isSuperAdmin', sql.Bit, isSuperAdmin)
+      .input('isDemo', sql.Bit, isDemo)
       .query(`
-        INSERT INTO tblAdmins (username, password, email)
-        VALUES (@username, @password, @email)
+        INSERT INTO tblAdmins (username, password, email, isAdmin, isSuperAdmin, isDemo)
+        VALUES (@username, @password, @email, @isAdmin, @isSuperAdmin, @isDemo)
       `);
 
     res.status(201).json({ message: 'Admin registered successfully' });
@@ -41,6 +64,7 @@ router.post('/register', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // Login
 router.post('/login', async (req, res) => {
