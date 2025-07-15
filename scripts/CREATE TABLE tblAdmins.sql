@@ -10,7 +10,10 @@ CREATE TABLE dbo.tblAdmins (
     username NVARCHAR(50) NOT NULL UNIQUE,
     password NVARCHAR(255) NOT NULL,
     email NVARCHAR(100),
-    created_at DATETIME DEFAULT GETDATE()
+    created_at DATETIME DEFAULT GETDATE(),
+    isAdmin BIT DEFAULT 0,
+    isSuperAdmin BIT DEFAULT 0,
+    isDemo BIT DEFAULT 0
 );
 
 GO
