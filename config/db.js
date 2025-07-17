@@ -1,19 +1,15 @@
 require('dotenv').config();
+const { Pool } = require('pg');
 
-const sql = require('mssql');
-
-const config = {
-  user: process.env.DB_USER,    
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER,
-  database: process.env.DB_NAME,
-  options: {
-    instanceName: process.env.DB_INSTANCE,  //use instance or port depends on your sql server connection
-    encrypt: false,
-    trustServerCertificate: true
+const pool = new Pool({
+  host: process.env.PG_HOST,         // e.g., db.abcd.supabase.co
+  port: 5432,                        // default PostgreSQL port
+  user: process.env.PG_USER,         // from Supabase
+  password: process.env.PG_PASSWORD, // from Supabase
+  database: process.env.PG_DATABASE, // from Supabase
+  ssl: {
+    rejectUnauthorized: false        // needed for Supabase
   }
-};
+});
 
-sql.connect(config).catch(err => console.error('DB Connection Failed:', err));
-
-module.exports = { sql, config };
+module.exports = { pool };

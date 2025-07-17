@@ -1,59 +1,58 @@
-// routes/transactionHistory.js
 const express = require('express');
 const router = express.Router();
-const { sql, config } = require('../config/db');
+const { pool } = require('../config/db');
 
+// GET /transaction-history
 router.get('/', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
-  const clientNameFilter = req.query.clientName || ''; // ✅ New filter
+  const clientNameFilter = req.query.clientName || '';
   const offset = (page - 1) * limit;
 
   try {
-    const pool = await sql.connect(config);
+    const values = [];
+    let whereClause = '';
+    
+    if (clientNameFilter) {
+      values.push(`%${clientNameFilter}%`);
+      whereClause = `WHERE c.clientname ILIKE $${values.length}`;
+    }
 
-    // Build WHERE clause
-    const whereClause = clientNameFilter
-      ? `WHERE c.clientName LIKE '%' + @clientName + '%'`
-      : '';
+    // Main paginated query
+    const dataQuery = `
+      SELECT 
+        th.historyid,
+        th.trackingid,
+        th.clientid,
+        c.clientname,
+        th.trackingmessage,
+        th.description,
+        s.statusname,
+        th.created_at,
+        th.changed_at
+      FROM tbltransactionhistory th
+      INNER JOIN tblclients c ON th.clientid = c.clientid
+      INNER JOIN tblstatus s ON th.trackingstatusid = s.id
+      ${whereClause}
+      ORDER BY th.historyid ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
-    // Main data query
-    const dataResult = await pool.request()
-      .input('clientName', sql.NVarChar, clientNameFilter)
-      .query(`
-        SELECT 
-          th.historyId,
-          th.trackingId,
-          th.clientId,
-          c.clientName,
-          th.trackingMessage,
-          th.description,
-          s.statusName,
-          th.created_at,
-          th.changed_at
-        FROM tblTransactionHistory th
-        INNER JOIN tblClients c ON th.clientId = c.clientId
-        INNER JOIN tblStatus s ON th.trackingStatusId = s.Id
-        ${whereClause}
-        ORDER BY th.historyId ASC
-        OFFSET ${offset} ROWS
-        FETCH NEXT ${limit} ROWS ONLY
-      `);
+    const dataResult = await pool.query(dataQuery, values);
 
     // Count query
-    const countResult = await pool.request()
-      .input('clientName', sql.NVarChar, clientNameFilter)
-      .query(`
-        SELECT COUNT(*) as total
-        FROM tblTransactionHistory th
-        INNER JOIN tblClients c ON th.clientId = c.clientId
-        ${whereClause}
-      `);
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM tbltransactionhistory th
+      INNER JOIN tblclients c ON th.clientid = c.clientid
+      ${whereClause}
+    `;
 
-    const total = countResult.recordset[0].total;
+    const countResult = await pool.query(countQuery, values);
+    const total = parseInt(countResult.rows[0].total, 10);
 
     res.status(200).json({
-      history: dataResult.recordset,
+      history: dataResult.rows,
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -64,7 +63,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-
 // DELETE /transaction-history/:id
 router.delete('/:id', async (req, res) => {
   const trackingId = req.params.id;
@@ -74,21 +72,21 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const pool = await sql.connect(config);
-
     // Check if record exists
-    const existing = await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .query('SELECT trackingId FROM tblTransactionHistory WHERE trackingId = @trackingId');
+    const checkResult = await pool.query(
+      'SELECT trackingid FROM tbltransactionhistory WHERE trackingid = $1',
+      [trackingId]
+    );
 
-    if (existing.recordset.length === 0) {
+    if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction history not found' });
     }
 
-    // Delete the record
-    await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .query('DELETE FROM tblTransactionHistory WHERE trackingId = @trackingId');
+    // Delete record
+    await pool.query(
+      'DELETE FROM tbltransactionhistory WHERE trackingid = $1',
+      [trackingId]
+    );
 
     res.status(200).json({ message: 'Transaction history deleted successfully' });
   } catch (error) {
@@ -96,6 +94,5 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete transaction history' });
   }
 });
-
 
 module.exports = router;

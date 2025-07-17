@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { sql, config } = require('../config/db');
+const { pool } = require('../config/db');
 const crypto = require('crypto');
 
 function generateTrackingId() {
@@ -9,7 +9,7 @@ function generateTrackingId() {
   return `TRX-${now}-${rand}`;
 }
 
-// GET transaction by trackingId
+// GET /transactions/:id
 router.get('/:id', async (req, res) => {
   const trackingId = req.params.id;
 
@@ -18,71 +18,60 @@ router.get('/:id', async (req, res) => {
   }
 
   try {
-    const pool = await sql.connect(config);
-    const result = await pool
-      .request()
-      .input('trackingId', sql.NVarChar, trackingId)
-      .query(`
-        SELECT 
-          t.trackingId, 
-          t.clientId,
-          c.clientName,
-          t.trackingMessage,
-          t.description, 
-          s.statusName, 
-          t.created_at
-        FROM tblTransactions t
-        INNER JOIN tblClients c ON t.clientId = c.clientId
-        INNER JOIN tblStatus s ON t.trackingStatusId = s.Id
-        WHERE t.trackingId = @trackingId
-      `);
+    const result = await pool.query(`
+      SELECT 
+        t.trackingid, 
+        t.clientid,
+        c.clientname,
+        t.trackingmessage,
+        t.description, 
+        s.statusname, 
+        t.created_at
+      FROM tbltransactions t
+      INNER JOIN tblclients c ON t.clientid = c.clientid
+      INNER JOIN tblstatus s ON t.trackingstatusid = s.id
+      WHERE t.trackingid = $1
+    `, [trackingId]);
 
-    if (result.recordset.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    res.json(result.recordset[0]);
+    res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching transaction by tracking ID:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
-// GET all transactions with pagination
+// GET /transactions?page=1&limit=10
 router.get('/', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   const offset = (page - 1) * limit;
 
   try {
-    const pool = await sql.connect(config);
-
-    const dataResult = await pool.request().query(`
+    const dataResult = await pool.query(`
       SELECT 
-        t.trackingId, 
-        t.clientId,
-        c.clientName, 
-        t.trackingMessage,
+        t.trackingid, 
+        t.clientid,
+        c.clientname, 
+        t.trackingmessage,
         t.description, 
-        s.statusName, 
+        s.statusname, 
         t.created_at
-      FROM tblTransactions t
-      INNER JOIN tblClients c ON t.clientId = c.clientId
-      INNER JOIN tblStatus s ON t.trackingStatusId = s.Id
-      ORDER BY t.trackingId ASC
-      OFFSET ${offset} ROWS
-      FETCH NEXT ${limit} ROWS ONLY
-    `);
+      FROM tbltransactions t
+      INNER JOIN tblclients c ON t.clientid = c.clientid
+      INNER JOIN tblstatus s ON t.trackingstatusid = s.id
+      ORDER BY t.trackingid ASC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
 
-    const countResult = await pool.request().query(`
-      SELECT COUNT(*) as total FROM tblTransactions
-    `);
-
-    const total = countResult.recordset[0].total;
+    const countResult = await pool.query(`SELECT COUNT(*) AS total FROM tbltransactions`);
+    const total = parseInt(countResult.rows[0].total, 10);
 
     res.status(200).json({
-      transactions: dataResult.recordset,
+      transactions: dataResult.rows,
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -93,7 +82,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST a new transaction
+// POST /transactions
 router.post('/', async (req, res) => {
   const { clientId, trackingMessage, trackingStatusId, description } = req.body;
 
@@ -103,7 +92,6 @@ router.post('/', async (req, res) => {
     });
   }
 
-  const pool = await sql.connect(config);
   let trackingId;
   let inserted = false;
   let attempts = 0;
@@ -114,26 +102,25 @@ router.post('/', async (req, res) => {
     attempts++;
 
     try {
-      await pool.request()
-        .input('trackingId', sql.NVarChar(50), trackingId)
-        .input('clientId', sql.Int, clientId)
-        .input('trackingMessage', sql.NVarChar(255), trackingMessage)
-        .input('trackingStatusId', sql.Int, trackingStatusId)
-        .input('description', sql.NVarChar(255), description || null)
-        .query(`
-          INSERT INTO tblTransactions (trackingId, clientId, trackingMessage, trackingStatusId, description)
-          VALUES (@trackingId, @clientId, @trackingMessage, @trackingStatusId, @description)
-        `);
+      // Check for duplicate
+      const existing = await pool.query(
+        'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
+        [trackingId]
+      );
 
-      inserted = true;
-      res.status(201).json({ message: 'Transaction created successfully', trackingId });
-
-    } catch (error) {
-      if (error.originalError?.info?.number === 2627) {
+      if (existing.rows.length > 0) {
         console.warn(`Duplicate trackingId on attempt ${attempts}: ${trackingId}`);
         continue;
       }
 
+      await pool.query(`
+        INSERT INTO tbltransactions (trackingid, clientid, trackingmessage, trackingstatusid, description)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [trackingId, clientId, trackingMessage, trackingStatusId, description || null]);
+
+      inserted = true;
+      res.status(201).json({ message: 'Transaction created successfully', trackingId });
+    } catch (error) {
       console.error('Error creating transaction:', error);
       return res.status(500).json({ error: 'Failed to create transaction' });
     }
@@ -158,32 +145,23 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
-    const pool = await sql.connect(config);
+    const existing = await pool.query(
+      'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
+      [trackingId]
+    );
 
-    // Check if the transaction exists
-    const existing = await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .query('SELECT trackingId FROM tblTransactions WHERE trackingId = @trackingId');
-
-    if (existing.recordset.length === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    // Update the transaction
-    await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .input('clientId', sql.Int, clientId)
-      .input('trackingMessage', sql.NVarChar(255), trackingMessage)
-      .input('trackingStatusId', sql.Int, trackingStatusId)
-      .input('description', sql.NVarChar(255), description || null)
-      .query(`
-        UPDATE tblTransactions
-        SET clientId = @clientId,
-            trackingMessage = @trackingMessage,
-            trackingStatusId = @trackingStatusId,
-            description = @description
-        WHERE trackingId = @trackingId
-      `);
+    await pool.query(`
+      UPDATE tbltransactions
+      SET clientid = $1,
+          trackingmessage = $2,
+          trackingstatusid = $3,
+          description = $4
+      WHERE trackingid = $5
+    `, [clientId, trackingMessage, trackingStatusId, description || null, trackingId]);
 
     res.status(200).json({ message: 'Transaction updated successfully' });
   } catch (error) {
@@ -201,21 +179,16 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const pool = await sql.connect(config);
+    const existing = await pool.query(
+      'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
+      [trackingId]
+    );
 
-    // Check if transaction exists
-    const existing = await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .query('SELECT trackingId FROM tblTransactions WHERE trackingId = @trackingId');
-
-    if (existing.recordset.length === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    // Delete the transaction
-    await pool.request()
-      .input('trackingId', sql.NVarChar(50), trackingId)
-      .query('DELETE FROM tblTransactions WHERE trackingId = @trackingId');
+    await pool.query('DELETE FROM tbltransactions WHERE trackingid = $1', [trackingId]);
 
     res.status(200).json({ message: 'Transaction deleted successfully' });
   } catch (error) {
