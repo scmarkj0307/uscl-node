@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/db');
+const { supabase } = require('../config/supabaseClient');
 
 // GET /clients?page=1&limit=10
 router.get('/', async (req, res) => {
@@ -9,32 +9,42 @@ router.get('/', async (req, res) => {
   const offset = (page - 1) * limit;
 
   try {
-    const dataResult = await pool.query(`
-      SELECT 
+    // Fetch paginated clients
+    const { data: clients, error } = await supabase
+      .from('tblClients')
+      .select(`
         clientid,
-        clientname,
+        clientName,
         email,
-        CASE 
-          WHEN isactive THEN 'Active'
-          ELSE 'Inactive'
-        END AS status,
+        isactive,
         created_at
-      FROM tblclients
-      ORDER BY clientid ASC
-      LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+      `)
+      .order('clientid', { ascending: true })
+      .range(offset, offset + limit - 1);
 
-    const countResult = await pool.query(`SELECT COUNT(*) FROM tblclients`);
-    const total = parseInt(countResult.rows[0].count, 10);
+    if (error) throw error;
+
+    // Get total count
+    const { count, error: countError } = await supabase
+      .from('tblClients')
+      .select('*', { count: 'exact', head: true });
+
+    if (countError) throw countError;
+
+    // Transform status text
+    const transformedClients = clients.map(client => ({
+      ...client,
+      status: client.isactive ? 'Active' : 'Inactive'
+    }));
 
     res.status(200).json({
-      clients: dataResult.rows,
-      total,
+      clients: transformedClients,
+      total: count,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(count / limit)
     });
   } catch (error) {
-    console.error('Error fetching clients:', error);
+    console.error('Error fetching clients:', error.message || error);
     res.status(500).json({ error: 'Failed to fetch clients' });
   }
 });
@@ -48,84 +58,106 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    await pool.query(`
-      INSERT INTO tblclients (clientname, email, isactive)
-      VALUES ($1, $2, $3)
-    `, [clientName, email, isActive]);
+    const { error } = await supabase
+      .from('tblClients')
+      .insert([{
+        clientName: clientName,
+        email,
+        isactive: isActive
+      }]);
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'Client with the same name or email already exists' });
+      }
+      throw error;
+    }
 
     res.status(201).json({ message: 'Client added successfully' });
   } catch (error) {
-    console.error('Error adding client:', error);
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Client with the same name or email already exists' });
-    }
+    console.error('Error adding client:', error.message || error);
     res.status(500).json({ error: 'Failed to add client' });
   }
 });
 
 // PUT /clients/:id
 router.put('/:id', async (req, res) => {
-  const clientId = parseInt(req.params.id);
+  const clientid = parseInt(req.params.id);
   const { clientName, email, isActive } = req.body;
 
-  if (!clientId || !clientName || !email || typeof isActive !== 'boolean') {
+  if (!clientid || !clientName || !email || typeof isActive !== 'boolean') {
     return res.status(400).json({ error: 'clientId, clientName, email, and isActive (boolean) are required' });
   }
 
   try {
-    const existingClient = await pool.query(
-      'SELECT * FROM tblclients WHERE clientid = $1',
-      [clientId]
-    );
+    // Check if client exists
+    const { data: existingClient, error: findError } = await supabase
+      .from('tblClients')
+      .select('clientid')
+      .eq('clientid', clientid)
+      .single();
 
-    if (existingClient.rows.length === 0) {
+    if (findError || !existingClient) {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    await pool.query(`
-      UPDATE tblclients
-      SET clientname = $1,
-          email = $2,
-          isactive = $3
-      WHERE clientid = $4
-    `, [clientName, email, isActive, clientId]);
+    // Update client
+    const { error: updateError } = await supabase
+      .from('tblClients')
+      .update({
+        clientName: clientName,
+        email,
+        isactive: isActive
+      })
+      .eq('clientid', clientid);
+
+    if (updateError) {
+      if (updateError.code === '23505') {
+        return res.status(409).json({ error: 'Client with the same name or email already exists' });
+      }
+      throw updateError;
+    }
 
     res.status(200).json({ message: 'Client updated successfully' });
   } catch (error) {
-    console.error('Error updating client:', error);
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Client with the same name or email already exists' });
-    }
+    console.error('Error updating client:', error.message || error);
     res.status(500).json({ error: 'Failed to update client' });
   }
 });
 
 // DELETE /clients/:id
 router.delete('/:id', async (req, res) => {
-  const clientId = parseInt(req.params.id);
+  const idParam = req.params.id;
+  const clientid = parseInt(idParam);
+  console.log('DELETE request for clientId:', idParam);
 
-  if (!clientId) {
+  if (!clientid) {
     return res.status(400).json({ error: 'Invalid client ID' });
   }
 
   try {
-    const existing = await pool.query(
-      'SELECT clientid FROM tblclients WHERE clientid = $1',
-      [clientId]
-    );
+    // Check if client exists
+    const { data: existing, error: findError } = await supabase
+      .from('tblClients')
+      .select('clientid')
+      .eq('clientid', clientid)
+      .single();
 
-    if (existing.rows.length === 0) {
+    if (findError || !existing) {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    await pool.query(
-      'DELETE FROM tblclients WHERE clientid = $1',
-      [clientId]
-    );
+    // Delete client
+    const { error: deleteError } = await supabase
+      .from('tblClients')
+      .delete()
+      .eq('clientid', clientid);
+
+    if (deleteError) throw deleteError;
 
     res.status(200).json({ message: 'Client deleted successfully' });
   } catch (error) {
-    console.error('Error deleting client:', error);
+    console.error('Error deleting client:', error.message || error);
     res.status(500).json({ error: 'Failed to delete client' });
   }
 });

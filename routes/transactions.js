@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/db');
+const { supabase } = require('../config/supabaseClient');
 const crypto = require('crypto');
 
+// Helper: Generate unique tracking ID
 function generateTrackingId() {
-  const now = Date.now().toString(36).toUpperCase(); // timestamp base36
-  const rand = crypto.randomBytes(3).toString('hex').toUpperCase(); // 6 chars
+  const now = Date.now().toString(36).toUpperCase();
+  const rand = crypto.randomBytes(3).toString('hex').toUpperCase();
   return `TRX-${now}-${rand}`;
 }
 
@@ -18,26 +19,35 @@ router.get('/:id', async (req, res) => {
   }
 
   try {
-    const result = await pool.query(`
-      SELECT 
-        t.trackingid, 
-        t.clientid,
-        c.clientname,
-        t.trackingmessage,
-        t.description, 
-        s.statusname, 
-        t.created_at
-      FROM tbltransactions t
-      INNER JOIN tblclients c ON t.clientid = c.clientid
-      INNER JOIN tblstatus s ON t.trackingstatusid = s.id
-      WHERE t.trackingid = $1
-    `, [trackingId]);
+    const { data, error } = await supabase
+      .from('tblTransactions')
+      .select(`
+        trackingid,
+        clientid,
+        trackingmessage,
+        description,
+        created_at,
+        tblClients (clientName),
+        tblStatus (statusname)
+      `)
+      .eq('trackingid', trackingId)
+      .maybeSingle();
 
-    if (result.rows.length === 0) {
+    if (error || !data) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    res.json(result.rows[0]);
+    const result = {
+      trackingid: data.trackingid,
+      clientid: data.clientid,
+      trackingmessage: data.trackingmessage,
+      description: data.description,
+      created_at: data.created_at,
+      clientname: data.tblClients?.clientname || '',
+      statusname: data.tblStatus?.statusname || '',
+    };
+
+    res.json(result);
   } catch (err) {
     console.error('Error fetching transaction by tracking ID:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -48,120 +58,154 @@ router.get('/:id', async (req, res) => {
 router.get('/', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
-  const offset = (page - 1) * limit;
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
   try {
-    const dataResult = await pool.query(`
-      SELECT 
-        t.trackingid, 
-        t.clientid,
-        c.clientname, 
-        t.trackingmessage,
-        t.description, 
-        s.statusname, 
-        t.created_at
-      FROM tbltransactions t
-      INNER JOIN tblclients c ON t.clientid = c.clientid
-      INNER JOIN tblstatus s ON t.trackingstatusid = s.id
-      ORDER BY t.trackingid ASC
-      LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+    // Fetch paginated transactions with joins to tblClients and tblStatus
+    const { data, error } = await supabase
+      .from('tblTransactions')
+      .select(`
+        trackingid,
+        clientid,
+        trackingmessage,
+        description,
+        created_at,
+        tblClients (clientName),
+        tblStatus (statusname)
+      `)
+      .order('trackingid', { ascending: true })
+      .range(from, to);
+    if (error) {
+      console.log('check error')
+      throw error;
+    }
 
-    const countResult = await pool.query(`SELECT COUNT(*) AS total FROM tbltransactions`);
-    const total = parseInt(countResult.rows[0].total, 10);
+    // Fetch total count separately
+    const { count, error: countError } = await supabase
+      .from('tblTransactions')
+      .select('trackingid', { count: 'exact', head: true });
+
+    if (countError) {
+      throw countError;
+    }
+
+    // Format joined data
+    const transactions = data.map(t => ({
+      trackingid: t.trackingid,
+      clientid: t.clientid,
+      clientName: t.tblClients?.clientName || '',
+      trackingmessage: t.trackingmessage,
+      description: t.description,
+      statusname: t.tblStatus?.statusname || '',
+      created_at: t.created_at
+    }));
 
     res.status(200).json({
-      transactions: dataResult.rows,
-      total,
+      transactions,
+      total: count || 0,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil((count || 0) / limit)
     });
   } catch (error) {
-    console.error('Error fetching transactions:', error);
+    console.error('Error fetching transactions:', error.message || error);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 });
 
+
 // POST /transactions
 router.post('/', async (req, res) => {
-  const { clientId, trackingMessage, trackingStatusId, description } = req.body;
+  const { clientid, trackingmessage, trackingstatusid, description } = req.body;
 
-  if (!clientId || !trackingMessage || !trackingStatusId) {
+  if (!clientid || !trackingmessage || !trackingstatusid) {
     return res.status(400).json({
-      error: 'clientId, trackingMessage, and trackingStatusId are required',
+      error: 'clientid, trackingMessage, and trackingStatusId are required',
     });
   }
 
-  let trackingId;
+  let trackingid;
   let inserted = false;
   let attempts = 0;
-  const maxAttempts = 5;
 
-  while (!inserted && attempts < maxAttempts) {
-    trackingId = generateTrackingId();
+  while (!inserted && attempts < 5) {
+    trackingid = generateTrackingId(); // Your own custom function
     attempts++;
 
-    try {
-      // Check for duplicate
-      const existing = await pool.query(
-        'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
-        [trackingId]
-      );
+    // Check if tracking ID already exists
+    const { data: existing, error: checkError } = await supabase
+      .from('tblTransactions')
+      .select('trackingid')
+      .eq('trackingid', trackingid)
+      .maybeSingle();
 
-      if (existing.rows.length > 0) {
-        console.warn(`Duplicate trackingId on attempt ${attempts}: ${trackingId}`);
-        continue;
-      }
+    if (checkError) {
+      console.error('❌ Error checking duplicate tracking ID:', checkError.message);
+      return res.status(500).json({ error: 'Failed to check tracking ID' });
+    }
 
-      await pool.query(`
-        INSERT INTO tbltransactions (trackingid, clientid, trackingmessage, trackingstatusid, description)
-        VALUES ($1, $2, $3, $4, $5)
-      `, [trackingId, clientId, trackingMessage, trackingStatusId, description || null]);
+    if (existing) {
+      continue; // Duplicate ID found — retry
+    }
 
+    // Insert transaction
+    const { error: insertError } = await supabase
+      .from('tblTransactions')
+      .insert([{
+        trackingid,
+        clientid,
+        trackingmessage: trackingmessage,
+        trackingstatusid: trackingstatusid,
+        description: description || null,
+      }]);
+
+    if (!insertError) {
       inserted = true;
-      res.status(201).json({ message: 'Transaction created successfully', trackingId });
-    } catch (error) {
-      console.error('Error creating transaction:', error);
-      return res.status(500).json({ error: 'Failed to create transaction' });
+      return res.status(201).json({ message: 'Transaction created successfully', trackingid });
+    } else {
+      console.error('❌ Insert error:', insertError.message);
     }
   }
 
-  if (!inserted) {
-    res.status(500).json({
-      error: 'Failed to generate a unique tracking ID. Please try again.'
-    });
-  }
+  // If 5 attempts fail
+  return res.status(500).json({
+    error: 'Failed to generate a unique tracking ID. Please try again.',
+  });
 });
 
 // PUT /transactions/:id
 router.put('/:id', async (req, res) => {
-  const trackingId = req.params.id;
-  const { clientId, trackingMessage, trackingStatusId, description } = req.body;
+  const trackingid = req.params.id;
+  const { clientid, trackingmessage, trackingstatusid, description } = req.body;
 
-  if (!trackingId || !clientId || !trackingMessage || !trackingStatusId) {
+  if (!trackingid || !clientid || !trackingmessage || !trackingstatusid) {
     return res.status(400).json({
       error: 'trackingId, clientId, trackingMessage, and trackingStatusId are required',
     });
   }
 
   try {
-    const existing = await pool.query(
-      'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
-      [trackingId]
-    );
+    const { data: existing, error: findError } = await supabase
+      .from('tblTransactions')
+      .select('trackingid')
+      .eq('trackingid', trackingid)
+      .maybeSingle();
 
-    if (existing.rows.length === 0) {
+    if (findError || !existing) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    await pool.query(`
-      UPDATE tbltransactions
-      SET clientid = $1,
-          trackingmessage = $2,
-          trackingstatusid = $3,
-          description = $4
-      WHERE trackingid = $5
-    `, [clientId, trackingMessage, trackingStatusId, description || null, trackingId]);
+    const { error } = await supabase
+      .from('tblTransactions')
+      .update({
+        clientid: clientid,
+        trackingmessage: trackingmessage,
+        trackingstatusid: trackingstatusid,
+        description: description || null
+      })
+      .eq('trackingid', trackingid);
+
+    if (error) throw error;
 
     res.status(200).json({ message: 'Transaction updated successfully' });
   } catch (error) {
@@ -172,23 +216,29 @@ router.put('/:id', async (req, res) => {
 
 // DELETE /transactions/:id
 router.delete('/:id', async (req, res) => {
-  const trackingId = req.params.id;
+  const trackingid = req.params.id;
 
-  if (!trackingId) {
+  if (!trackingid) {
     return res.status(400).json({ error: 'Invalid tracking ID' });
   }
 
   try {
-    const existing = await pool.query(
-      'SELECT trackingid FROM tbltransactions WHERE trackingid = $1',
-      [trackingId]
-    );
+    const { data: existing, error: findError } = await supabase
+      .from('tblTransactions')
+      .select('trackingid')
+      .eq('trackingid', trackingid)
+      .maybeSingle();
 
-    if (existing.rows.length === 0) {
+    if (findError || !existing) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
-    await pool.query('DELETE FROM tbltransactions WHERE trackingid = $1', [trackingId]);
+    const { error } = await supabase
+      .from('tblTransactions')
+      .delete()
+      .eq('trackingid', trackingid);
+
+    if (error) throw error;
 
     res.status(200).json({ message: 'Transaction deleted successfully' });
   } catch (error) {

@@ -1,61 +1,69 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/db');
+const { supabase } = require('../config/supabaseClient');
 
 // GET /transaction-history
 router.get('/', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
-  const clientNameFilter = req.query.clientName || '';
   const offset = (page - 1) * limit;
+  const clientNameFilter = req.query.clientName || '';
 
   try {
-    const values = [];
-    let whereClause = '';
-    
-    if (clientNameFilter) {
-      values.push(`%${clientNameFilter}%`);
-      whereClause = `WHERE c.clientname ILIKE $${values.length}`;
+    // Initial query
+    let { data, error } = await supabase
+      .from('tbltransactionhistory')
+      .select(`
+        historyid,
+        trackingid,
+        clientid,
+        trackingmessage,
+        description,
+        created_at,
+        changed_at,
+        tblClients (clientName),
+        tblStatus (statusname)
+      `)
+      .order('historyid', { ascending: true })
+      .range(offset, offset + limit - 1);
+
+    // ✅ Check if error occurred or data is null
+    if (error || !data) {
+      throw error || new Error('No data returned from Supabase');
     }
 
-    // Main paginated query
-    const dataQuery = `
-      SELECT 
-        th.historyid,
-        th.trackingid,
-        th.clientid,
-        c.clientname,
-        th.trackingmessage,
-        th.description,
-        s.statusname,
-        th.created_at,
-        th.changed_at
-      FROM tbltransactionhistory th
-      INNER JOIN tblclients c ON th.clientid = c.clientid
-      INNER JOIN tblstatus s ON th.trackingstatusid = s.id
-      ${whereClause}
-      ORDER BY th.historyid ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `;
+    // Apply clientName filter manually (since Supabase cannot filter on joined data directly)
+    if (clientNameFilter) {
+      data = data.filter(entry =>
+        entry.tblClients?.clientName?.toLowerCase().includes(clientNameFilter.toLowerCase())
+      );
+    }
 
-    const dataResult = await pool.query(dataQuery, values);
+    // Total count query (counting unpaginated rows)
+    const { count, error: countError } = await supabase
+      .from('tbltransactionhistory')
+      .select('historyid', { count: 'exact', head: true });
 
-    // Count query
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM tbltransactionhistory th
-      INNER JOIN tblclients c ON th.clientid = c.clientid
-      ${whereClause}
-    `;
+    if (countError) throw countError;
 
-    const countResult = await pool.query(countQuery, values);
-    const total = parseInt(countResult.rows[0].total, 10);
+    // Transform data for frontend
+    const history = data.map((h) => ({
+      historyid: h.historyid,
+      trackingid: h.trackingid,
+      clientid: h.clientid,
+      clientName: h.tblClients?.clientName || '',
+      trackingmessage: h.trackingmessage,
+      description: h.description,
+      statusname: h.tblStatus?.statusname || '',
+      created_at: h.created_at,
+      changed_at: h.changed_at,
+    }));
 
     res.status(200).json({
-      history: dataResult.rows,
-      total,
+      history,
+      total: count || 0,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil((count || 0) / limit),
     });
   } catch (error) {
     console.error('Error fetching transaction history:', error);
@@ -63,34 +71,38 @@ router.get('/', async (req, res) => {
   }
 });
 
+
+
 // DELETE /transaction-history/:id
 router.delete('/:id', async (req, res) => {
-  const trackingId = req.params.id;
-
-  if (!trackingId) {
+  const trackingid = req.params.id;
+  if (!trackingid) {
     return res.status(400).json({ error: 'Invalid history ID' });
   }
 
   try {
     // Check if record exists
-    const checkResult = await pool.query(
-      'SELECT trackingid FROM tbltransactionhistory WHERE trackingid = $1',
-      [trackingId]
-    );
+    const { data: existing, error: findError } = await supabase
+      .from('tbltransactionhistory')
+      .select('trackingid')
+      .eq('trackingid', trackingid)
+      .single();
 
-    if (checkResult.rows.length === 0) {
+    if (findError || !existing) {
       return res.status(404).json({ error: 'Transaction history not found' });
     }
 
-    // Delete record
-    await pool.query(
-      'DELETE FROM tbltransactionhistory WHERE trackingid = $1',
-      [trackingId]
-    );
+    // Delete
+    const { error: deleteError } = await supabase
+      .from('tbltransactionhistory')
+      .delete()
+      .eq('trackingid', trackingid);
+
+    if (deleteError) throw deleteError;
 
     res.status(200).json({ message: 'Transaction history deleted successfully' });
   } catch (error) {
-    console.error('Error deleting transaction history:', error);
+    console.error('Error deleting transaction history:', error.message || error);
     res.status(500).json({ error: 'Failed to delete transaction history' });
   }
 });
