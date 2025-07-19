@@ -10,7 +10,9 @@ const transactionHistoryRouter = require('./routes/transactionHistory');
 const app = express();
 
 app.use(cors({
-  origin: ['https://your-vercel-app.vercel.app'], // ✅ allow your actual frontend URL
+  origin: ['https://your-vercel-app.vercel.app',
+           'http://localhost:4200'
+  ], // ✅ allow your actual frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true // if you’re using cookies or auth
 }));
