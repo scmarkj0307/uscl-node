@@ -10,7 +10,7 @@ const transactionHistoryRouter = require('./routes/transactionHistory');
 const app = express();
 
 app.use(cors({
-  origin: ['https://uscl-ltd.vercel.app/',
+  origin: ['https://uscl-ltd.vercel.app',
            'https://uscl-ltd-markjs-projects.vercel.app',
            'http://localhost:4200'
   ], // ✅ allow your actual frontend URL
